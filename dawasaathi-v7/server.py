@@ -51,8 +51,23 @@ PRESCRIPTION_SCHEMA = {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "drug_name": {"type": "string"},
-                    "drug_name_hindi": {"type": "string"},
+                    "prescribed_name": {"type": "string"},
+                    "generic_name": {"type": "string"},
+                    "generic_name_hindi": {"type": "string"},
+                    "generic_ingredients": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "name": {"type": "string"},
+                                "name_hindi": {"type": "string"},
+                                "confidence": {"type": "number"}
+                            },
+                            "required": ["name", "name_hindi", "confidence"]
+                        }
+                    },
+                    "generic_mapping_confidence": {"type": "number"},
                     "dose": {"type": "string"},
                     "frequency": {"type": "string"},
                     "route": {"type": "string"},
@@ -63,7 +78,8 @@ PRESCRIPTION_SCHEMA = {
                     "uncertainty": {"type": "string"}
                 },
                 "required": [
-                    "drug_name", "drug_name_hindi", "dose", "frequency", "route", "duration",
+                    "prescribed_name", "generic_name", "generic_name_hindi", "generic_ingredients",
+                    "generic_mapping_confidence", "dose", "frequency", "route", "duration",
                     "instructions", "instructions_hindi", "confidence", "uncertainty"
                 ]
             }
@@ -115,37 +131,42 @@ MEDICINE_SCHEMA = {
     ]
 }
 
-PRESCRIPTION_INSTRUCTIONS = """You are the vision extraction component of a medication-safety prototype for English prescriptions used in India.
-Your job is only to read and structure what is visible. Do not diagnose, recommend treatment, or silently fill missing clinical information from medical knowledge.
+PRESCRIPTION_INSTRUCTIONS = """You are the vision extraction and medication-normalization component of a medication-safety prototype for English prescriptions used in India.
+Your job is to read the prescription accurately and normalize each clearly identified medicine to its generic active ingredient(s). Do not diagnose, recommend treatment, or infer dose/frequency/route/duration from medical knowledge.
 
 Rules:
 1. The prescription and medicine names are expected to be written in English, often by hand.
 2. Transcribe visible English text faithfully in raw_transcription.
-3. For each medication, extract drug_name, dose, frequency, route, duration and visible medication-specific instructions.
-4. drug_name must preserve the English spelling actually read from the prescription. drug_name_hindi must be a phonetic Devanagari rendering of that same name for a Hindi-speaking patient. Do not translate the medicine into another medicine or generic name.
-5. instructions_hindi must be a faithful, simple Hindi translation of instructions that are visibly present. If no medication-specific instruction is visible, return an empty string. Do not add food timing or other advice that is not visible.
-6. Preserve visible prescription abbreviations exactly in frequency. Use this project's authoritative mapping when reading them: OD = once a day at any fixed time; OD BBF = once a day in the morning on an empty stomach; BD = twice a day; TDS = thrice a day; QID = four times a day; ABF = after breakfast; BL = before lunch; AL = after lunch; AD = after dinner; OD HS = once a day before sleeping. Keep composite forms such as 'OD BBF' and 'OD HS' together in the frequency field. MV means multivitamin and BC means B complex when those abbreviations are visibly written as the medicine name.
-7. If a clinical field is not visible or not safely readable, return an empty string and explain the uncertainty. Never guess a drug name, strength, frequency, route or duration.
-8. You may label route as Oral only when oral use is unambiguous from the prescription; otherwise leave route empty.
-9. Put all other clinically relevant visible advice in other_instructions in English. Put faithful simple Hindi translations of the same items, in the same order, in other_instructions_hindi. Do not add advice.
-10. confidence means confidence in the visual reading, not confidence that the treatment is medically correct.
-11. If there are no medicines, medications must be an empty array.
+3. prescribed_name must preserve the medicine name actually written on the prescription, including a brand/trade name when that is what is written.
+4. generic_name must be the canonical generic/active-ingredient name used for matching. If prescribed_name is already a generic name, normalize spelling/capitalization only. If prescribed_name is a brand/trade name, you MAY use well-established medication knowledge to map it to its generic active ingredient(s), but only when the mapping is unambiguous. Never infer dose, strength, frequency, route, or duration from the brand.
+5. generic_ingredients must contain the canonical active ingredient(s), one object per ingredient. For a combination product include every active ingredient. generic_name should join multiple ingredients with " + " in the same order.
+6. generic_name_hindi and each generic ingredient name_hindi must be phonetic Devanagari renderings of the generic name(s), for patient display and speech.
+7. generic_mapping_confidence is confidence in the brand/generic normalization itself, from 0 to 1. If the prescribed name is unreadable, ambiguous, or the brand-to-generic mapping is uncertain, return generic_name="", generic_name_hindi="", generic_ingredients=[], set generic_mapping_confidence below 0.75, and explain why in uncertainty. Do not guess.
+8. Extract dose, frequency, route, duration and visible medication-specific instructions only from what is visible on the prescription.
+9. instructions_hindi must be a faithful, simple Hindi translation of instructions visibly present. If none are visible, return an empty string. Do not add food timing or other advice that is not visible.
+10. Preserve visible prescription abbreviations exactly in frequency. Use this project's authoritative mapping when reading them: OD = once a day at any fixed time; OD BBF = once a day in the morning on an empty stomach; BD = twice a day; TDS = thrice a day; QID = four times a day; ABF = after breakfast; BL = before lunch; AL = after lunch; AD = after dinner; OD HS = once a day before sleeping. Keep composite forms such as 'OD BBF' and 'OD HS' together. MV means multivitamin and BC means B complex when visibly written as the medicine name.
+11. If any clinical field is not visible or not safely readable, return an empty string and explain the uncertainty. Never guess dose, strength, frequency, route, or duration.
+12. You may label route as Oral only when oral use is unambiguous from the prescription; otherwise leave route empty.
+13. Put all other clinically relevant visible advice in other_instructions in English and faithful simple Hindi translations in other_instructions_hindi, in the same order. Do not add advice.
+14. confidence means confidence in the visual reading. generic_mapping_confidence separately measures confidence in generic normalization.
+15. If there are no medicines, medications must be an empty array.
 """
 
 MEDICINE_INSTRUCTIONS = """You are the vision extraction component of a medication-safety prototype for medicine strips, boxes, bottles, inhalers, drops and similar packs used in India.
-Your job is only to read and structure what is visibly printed on the pack. Do not diagnose, recommend treatment, or infer an ingredient from a brand name unless it is visibly printed.
+Your job is to read the pack and identify the generic active ingredient(s) printed in its composition. Do not diagnose or recommend treatment.
 
 Rules:
 1. Read English pack text carefully, including small composition text when visible.
-2. display_name is the clearest product/drug name printed on the pack. display_name_hindi is a phonetic Devanagari rendering of exactly that name for Hindi speech; do not translate it into another drug name.
+2. display_name is the clearest product/drug name printed on the pack. display_name_hindi is a phonetic Devanagari rendering of exactly that display name.
 3. brand_name is the brand/product name if clearly visible; otherwise empty.
-4. active_ingredients may contain only ingredients visibly printed on the pack. name_hindi must be the phonetic Devanagari rendering of the same visible ingredient name.
-5. Copy strengths exactly as visible, such as '500 mg', '20 mg', '250 mg/5 mL'.
-6. dosage_form should be a concise English form such as tablet, capsule, syrup, injection, inhaler, drops or cream; leave empty if unclear.
-7. release_type should capture visible modified-release wording such as SR, ER, XR, CR, MR, PR, XL, LA, sustained release or extended release; otherwise empty.
-8. raw_transcription should contain the most relevant visible pack text, including composition and strength.
-9. If text is unreadable, use empty strings rather than guessing and explain the problem in uncertainties.
-10. confidence is confidence in the visual reading only.
+4. active_ingredients are the generic active ingredients used for matching. Prefer the printed composition/active-ingredient text. Normalize obvious salt-equivalent wording to the therapeutic generic only when the pack itself makes that equivalence explicit (for example, 'amlodipine besylate equivalent to amlodipine 5 mg' -> Amlodipine). Do not infer an ingredient solely from a brand name if the composition is not visible.
+5. Each active ingredient name must be a canonical generic name, with name_hindi as its phonetic Devanagari rendering. Copy its visible strength exactly.
+6. Copy strengths exactly as visible, such as '500 mg', '20 mg', '250 mg/5 mL'.
+7. dosage_form should be a concise English form such as tablet, capsule, syrup, injection, inhaler, drops or cream; leave empty if unclear.
+8. release_type should capture visible modified-release wording such as SR, ER, XR, CR, MR, PR, XL, LA, sustained release or extended release; otherwise empty.
+9. raw_transcription should contain the most relevant visible pack text, especially composition and strength.
+10. If the active ingredient or text is unreadable, use empty strings rather than guessing and explain the problem in uncertainties.
+11. confidence is confidence in the visual reading only.
 """
 
 
