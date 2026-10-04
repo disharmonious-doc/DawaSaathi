@@ -275,6 +275,7 @@ function prescriptionVisionToParsed(v={}){
       nameHindi:safeHindiName(m.generic_name_hindi||''),
       dose:String(m.dose||'').trim(),
       frequency:String(m.frequency||'').trim(),
+      frequencyHindi:hasDevanagari(m.frequency_hindi||'')?String(m.frequency_hindi||'').trim():'',
       route:String(m.route||'').trim(),
       duration:String(m.duration||'').trim(),
       instructions:String(m.instructions||'').trim(),
@@ -497,7 +498,7 @@ function renderRx(parsed){
     for(const med of parsed.meds){
       const details=[];
       if(med.dose) details.push(`खुराक: ${strengthHindi(med.dose) || displayNumber(med.dose)}`);
-      if(med.frequency) details.push(`कितनी बार: ${frequencyHindi(med.frequency)}`);
+      if(med.frequency) details.push(`कितनी बार: ${med.frequencyHindi||frequencyHindi(med.frequency)}`);
       if(med.route && routeHindi(med.route)) details.push(`कैसे: ${routeHindi(med.route)}`);
       if(med.duration) details.push(`कितने समय: ${durationHindi(med.duration)}`);
       const name=med.genericNameHindi||med.nameHindi||'दवा का नाम स्पष्ट नहीं';
@@ -591,7 +592,7 @@ function makeGuidance(match,pack){
     instructionDisplay=frequencySentence(med.frequency,calc.units,pack.form,false);
     instructionVoice=frequencySentence(med.frequency,calc.units,pack.form,true);
   }else{
-    const f=frequencyHindi(med.frequency);
+    const f=med.frequencyHindi||frequencyHindi(med.frequency);
     instructionDisplay=f?`${f} लें`:'लेने की सही संख्या स्पष्ट नहीं है';
     instructionVoice=instructionDisplay;
   }
