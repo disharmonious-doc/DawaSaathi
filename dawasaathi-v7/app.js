@@ -115,6 +115,24 @@ function comparableStrength(a,b){
   if(a.unit===b.unit) return a.value/b.value;
   return null;
 }
+function massStrengthToMg(strength){
+  if(!strength) return null;
+  const mass={mcg:.001,mg:1,g:1000,kg:1000000};
+  if(!mass[strength.unit]) return null;
+  return strength.value*mass[strength.unit];
+}
+function fixedCombinationTotalStrength(ingredients=[]){
+  if(!Array.isArray(ingredients) || ingredients.length<2) return null;
+  let totalMg=0;
+  for(const ingredient of ingredients){
+    const parsed=parseStrength(ingredient?.strength||'');
+    const mg=massStrengthToMg(parsed);
+    if(mg===null) return null;
+    totalMg+=mg;
+  }
+  if(!(totalMg>0)) return null;
+  return {value:totalMg,unit:'mg',raw:`${totalMg} mg`,derived:true};
+}
 function strengthHindi(text=''){
   if(!text) return '';
   return displayNumber(String(text)
@@ -284,12 +302,14 @@ function medicineVisionToPack(v={}){
   const displayHindi=safeHindiName(v.display_name_hindi||primary.name_hindi||'');
   const strengthText=String(v.strength_text||primary.strength||'').trim();
   const looksConcentrated=/\/\s*\d|\/\s*(?:m?l|g)\b|\bper\s+\d/i.test(strengthText);
+  const fixedCombinationStrength=fixedCombinationTotalStrength(ingredients);
   return {
     name:displayName,
     nameHindi:displayHindi,
     brandName:String(v.brand_name||'').trim(),
     strength:strengthText,
     strengthObj:looksConcentrated?null:parseStrength(strengthText),
+    fixedCombinationStrength,
     modified:normalizeReleaseType(v.release_type||''),
     form:String(v.dosage_form||'').trim(),
     raw:String(v.raw_transcription||'').trim(),
@@ -342,7 +362,14 @@ function perDoseUnits(med,pack){
     const n=parseFloat(explicit[1]);
     if(n>0 && n<=4) return {units:n,reason:''};
   }
-  const rxStrength=parseStrength(doseText), packStrength=pack.strengthObj;
+  const rxStrength=parseStrength(doseText);
+  // For a fixed-dose combination, a prescription such as "625 mg" can refer to
+  // the combined strength of one unit (for example 500 mg + 125 mg = 625 mg).
+  // Prefer the sum of the printed component strengths when all components are
+  // compatible mass units. Otherwise fall back to the pack's displayed strength.
+  const packStrength=(pack.complex && pack.fixedCombinationStrength)
+    ? pack.fixedCombinationStrength
+    : pack.strengthObj;
   if(!rxStrength || !packStrength) return {units:null,reason:'गोली या इकाई की सही संख्या स्पष्ट नहीं है'};
   const ratio=comparableStrength(rxStrength,packStrength);
   if(ratio===null) return {units:null,reason:'पर्ची की खुराक और पैक की ताकत की इकाइयाँ आपस में नहीं मिल रहीं'};
@@ -535,9 +562,6 @@ function makeGuidance(match,pack){
   if(pack.overallConfidence<.55){
     return {type:'warn',title:'दवा की तस्वीर साफ़ नहीं पढ़ी गई',spoken:`${n} की जानकारी साफ़ नहीं पढ़ी गई। इसे लेने से पहले डॉक्टर या फार्मासिस्ट से पुष्टि करें।`,facts:'दवा का नाम या ताकत साफ़ पढ़ी नहीं गई।'};
   }
-  if(pack.complex){
-    return {type:'warn',title:'इस दवा में एक से अधिक दवाएँ हैं',spoken:`${n} में एक से अधिक दवा के घटक दिख रहे हैं। इसकी सही मात्रा डॉक्टर या फार्मासिस्ट से पुष्टि करें।`,facts:'मिश्रित दवा की मात्रा अपने-आप तय नहीं की गई।'};
-  }
   if(modifiedReleaseMismatch(pack,med)){
     return {type:'warn',title:'दवा का प्रकार अलग हो सकता है',spoken:`${n} का नाम मिलता है, लेकिन पैक का प्रकार पर्ची से अलग हो सकता है। इसे लेने से पहले डॉक्टर या फार्मासिस्ट से पुष्टि करें।`,facts:'धीरे-धीरे दवा छोड़ने वाला विशेष प्रकार पर्ची से साफ़ तौर पर नहीं मिला।'};
   }
@@ -584,7 +608,10 @@ function makeGuidance(match,pack){
     voice.push(`${calc.reason}। डॉक्टर या फार्मासिस्ट से पुष्टि करें।`);
   }
   const isSafe=!!(sched||calc.units||(liquidForm&&liquidDoseDisplay));
-  return {type:isSafe?'match':'warn',title:isSafe?'पर्ची से दवा मिल गई':'दवा मिली, मात्रा स्पष्ट नहीं',spoken:voice.join(' '),body:sentences.join(' '),facts:`पैक की ताकत: ${strengthHindi(pack.strength)||'स्पष्ट नहीं'}। पर्ची की खुराक: ${strengthHindi(med.dose)||'स्पष्ट नहीं'}।`};
+  const comboTotal=(pack.complex && pack.fixedCombinationStrength)
+    ? ` कुल संयुक्त ताकत: ${displayNumber(pack.fixedCombinationStrength.value)} मिलीग्राम।`
+    : '';
+  return {type:isSafe?'match':'warn',title:isSafe?'पर्ची से दवा मिल गई':'दवा मिली, मात्रा स्पष्ट नहीं',spoken:voice.join(' '),body:sentences.join(' '),facts:`पैक की ताकत: ${strengthHindi(pack.strength)||'स्पष्ट नहीं'}।${comboTotal} पर्ची की खुराक: ${strengthHindi(med.dose)||'स्पष्ट नहीं'}।`};
 }
 function renderMedResult(pack,match,g){
   const matched=match?.med;
