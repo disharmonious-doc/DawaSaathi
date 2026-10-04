@@ -37,6 +37,46 @@ function normalizeDrugName(s='') {
   if(n==='bc') n='b complex';
   return n;
 }
+
+// Canonical active-moiety aliases used ONLY for generic ingredient matching.
+// Keep this conservative: add an alias only when it represents the same active drug identity.
+// Dose, strength, release type and formulation are checked separately.
+const GENERIC_EQUIVALENTS = new Map([
+  ['amoxycillin','amoxicillin'],
+  ['amoxicillin trihydrate','amoxicillin'],
+  ['amoxycillin trihydrate','amoxicillin'],
+  ['amoxicillin sodium','amoxicillin'],
+  ['amoxycillin sodium','amoxicillin'],
+  ['clavulanic acid','clavulanic acid'],
+  ['clavulanate','clavulanic acid'],
+  ['clavulanate potassium','clavulanic acid'],
+  ['potassium clavulanate','clavulanic acid'],
+  ['potassium clavulanic acid','clavulanic acid'],
+  ['acetaminophen','paracetamol'],
+  ['paracetamol','paracetamol'],
+  ['albuterol','salbutamol'],
+  ['salbutamol','salbutamol']
+]);
+
+function canonicalIngredientName(value=''){
+  let n=normalizeDrugName(value)
+    .replace(/\b(equivalent to|equiv to|eq to)\b/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+
+  if(GENERIC_EQUIVALENTS.has(n)) return GENERIC_EQUIVALENTS.get(n);
+
+  // Normalize a few safe presentation variants before alias lookup.
+  n=n
+    .replace(/\bamoxycillin\b/g,'amoxicillin')
+    .replace(/\bpotassium clavulanate\b/g,'clavulanic acid')
+    .replace(/\bclavulanate potassium\b/g,'clavulanic acid')
+    .replace(/\bclavulanate\b/g,'clavulanic acid')
+    .replace(/\s+/g,' ')
+    .trim();
+
+  return GENERIC_EQUIVALENTS.get(n) || n;
+}
 function levenshtein(a,b){
   a=normalizeDrugName(a); b=normalizeDrugName(b);
   if(!a.length) return b.length; if(!b.length) return a.length;
@@ -202,6 +242,7 @@ function prescriptionVisionToParsed(v={}){
     const genericIngredients=(Array.isArray(m.generic_ingredients)?m.generic_ingredients:[])
       .map(x=>({
         name:String(x?.name||'').trim(),
+        canonicalName:canonicalIngredientName(x?.name||''),
         nameHindi:safeHindiName(x?.name_hindi||''),
         confidence:Number(x?.confidence||0)
       }))
@@ -232,6 +273,7 @@ function medicineVisionToPack(v={}){
   const ingredients=(Array.isArray(v.active_ingredients)?v.active_ingredients:[])
     .map(x=>({
       name:String(x?.name||'').trim(),
+      canonicalName:canonicalIngredientName(x?.name||''),
       nameHindi:safeHindiName(x?.name_hindi||''),
       strength:String(x?.strength||'').trim(),
       confidence:Number(x?.confidence||0)
@@ -258,7 +300,7 @@ function medicineVisionToPack(v={}){
   };
 }
 function ingredientSet(items=[]){
-  return [...new Set(items.map(x=>normalizeDrugName(x?.name||x)).filter(Boolean))].sort();
+  return [...new Set(items.map(x=>x?.canonicalName||canonicalIngredientName(x?.name||x)).filter(Boolean))].sort();
 }
 function ingredientSetScore(rxIngredients=[],packIngredients=[]){
   const rx=ingredientSet(rxIngredients), pk=ingredientSet(packIngredients);
@@ -270,7 +312,7 @@ function ingredientSetScore(rxIngredients=[],packIngredients=[]){
     let best=-1,bestScore=0;
     for(let i=0;i<pk.length;i++){
       if(used.has(i)) continue;
-      const score=nameSimilarity(r,pk[i]);
+      const score=(r===pk[i]) ? 1 : nameSimilarity(r,pk[i]);
       if(score>bestScore){bestScore=score;best=i;}
     }
     if(best<0 || bestScore<0.86) return 0;
