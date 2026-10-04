@@ -1,0 +1,35 @@
+:root{
+  font-family: system-ui,-apple-system,"Noto Sans Devanagari","Nirmala UI",sans-serif;
+  color:#173b39;
+  background:#f4f8f7;
+  --green:#0f766e;
+  --green2:#0b5e58;
+  --line:#dce7e5;
+  --soft:#edf7f5;
+  --warn:#fff7df;
+  --danger:#fff0ef;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#f4f8f7;color:#173b39}
+button,input{font:inherit}
+.page{width:min(760px,100%);margin:auto;padding:22px 16px 42px}
+.header{display:flex;align-items:center;gap:12px;margin:5px 0 18px}
+.mark{width:48px;height:48px;border-radius:15px;background:var(--green);color:white;display:grid;place-items:center;font-size:25px;font-weight:800}
+h1,h2,h3,p{margin:0}
+.header h1{font-size:28px;line-height:1.1}.header p{color:#56706d;margin-top:3px}
+.safety{background:#fff;border:1px solid var(--line);border-left:5px solid #d69c21;border-radius:14px;padding:13px 14px;line-height:1.55;margin-bottom:14px}
+.card{position:relative;background:#fff;border:1px solid var(--line);border-radius:20px;padding:20px;margin:14px 0;box-shadow:0 8px 24px rgba(28,73,69,.05)}
+.muted-card{opacity:.62}.muted-card.ready{opacity:1}
+.number{position:absolute;right:16px;top:16px;width:32px;height:32px;border-radius:50%;background:var(--soft);display:grid;place-items:center;font-weight:800;color:var(--green)}
+.section-head{padding-right:42px;margin-bottom:16px}.section-head h2{font-size:22px}.section-head p{color:#607875;margin-top:5px;line-height:1.5}
+.upload-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.big-action{min-height:112px;border:2px dashed #b8d3cf;border-radius:16px;padding:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:7px;cursor:pointer;background:#f8fcfb}.big-action span{font-size:28px}.big-action:hover{border-color:var(--green);background:var(--soft)}.big-action.secondary{background:#fff}
+.preview{margin-top:15px}.preview img{display:block;width:100%;max-height:360px;object-fit:contain;border-radius:14px;background:#eef3f2;border:1px solid var(--line)}
+.actions{display:flex;gap:10px;margin-top:12px}.primary,.plain{border:0;border-radius:12px;padding:13px 18px;font-weight:750;cursor:pointer}.primary{background:var(--green);color:#fff;flex:1}.primary:hover{background:var(--green2)}.primary:disabled{opacity:.5;cursor:not-allowed}.plain{background:#edf2f1;color:#214744}
+.loading{display:flex;align-items:center;gap:10px;margin-top:14px;padding:12px 14px;background:var(--soft);border-radius:12px}.spinner{width:18px;height:18px;border:3px solid #b9d7d3;border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.message{margin-top:12px;border-radius:12px;padding:12px 14px;background:var(--soft);line-height:1.45}.message.error{background:var(--danger);color:#812e2a}
+.medicine-list{display:grid;gap:10px}.rx-item{border:1px solid var(--line);border-radius:14px;padding:14px}.rx-name{font-size:19px;font-weight:800}.rx-details{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}.pill{background:#f0f5f4;border-radius:999px;padding:6px 9px;font-size:14px}.rx-note{margin-top:9px;color:#4f6865;line-height:1.5}
+.advice{margin-top:12px;background:#f8f4e9;border-radius:14px;padding:14px;line-height:1.55}.advice b{display:block;margin-bottom:6px}
+.result{margin-top:16px;border-radius:16px;padding:17px;border:1px solid var(--line);background:#f8fcfb}.result.match{background:#eef9f4;border-color:#b9e4cf}.result.warn{background:var(--warn);border-color:#ead79c}.result.no-match{background:var(--danger);border-color:#ecc2bf}.result h3{font-size:21px;margin-bottom:8px}.result .spoken{font-size:19px;line-height:1.65;font-weight:650}.result .facts{margin-top:12px;padding-top:12px;border-top:1px solid rgba(30,80,75,.14);line-height:1.6}.result-actions{display:flex;gap:10px;margin-top:14px}.result-actions button{flex:1}
+.history{display:grid;gap:9px}.history-item{padding:11px 13px;border:1px solid var(--line);border-radius:12px}.history-item b{display:block}.history-item small{color:#5c7471}
+footer{text-align:center;color:#647b78;font-size:14px;line-height:1.55;padding:12px 12px 0}.hidden{display:none!important}
+@media(max-width:560px){.page{padding:14px 12px 32px}.card{padding:17px;border-radius:17px}.upload-row{grid-template-columns:1fr}.big-action{min-height:92px}.actions,.result-actions{flex-direction:column}.section-head h2{font-size:20px}}

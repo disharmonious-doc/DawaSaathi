@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: dawasaathi
+    runtime: python
+    buildCommand: ""
+    startCommand: python3 server.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.6-sol
+      - key: OPENAI_TTS_MODEL
+        value: gpt-realtime-2.1-mini
+      - key: OPENAI_TTS_VOICE
+        value: marin
+      - key: RATE_LIMIT_PER_HOUR
+        value: "60"

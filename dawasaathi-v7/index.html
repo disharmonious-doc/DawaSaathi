@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0f766e" />
+  <title>दवा साथी</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div class="mark">द</div>
+      <div>
+        <h1>दवा साथी</h1>
+        <p>दवा सही समझें, सही लें</p>
+      </div>
+    </header>
+
+    <div class="safety" role="note">
+      यह सुविधा केवल दवा समझने में मदद करती है। किसी भी संदेह, अस्पष्ट लिखावट या अलग दवा मिलने पर डॉक्टर या फार्मासिस्ट से पूछें।
+    </div>
+
+    <section class="card" id="prescriptionCard">
+      <div class="number">1</div>
+      <div class="section-head">
+        <h2>प्रिस्क्रिप्शन की तस्वीर दें</h2>
+        <p>पूरी पर्ची साफ़ रोशनी में दिखाएँ।</p>
+      </div>
+
+      <div class="upload-row">
+        <label class="big-action">
+          <input id="rxCameraInput" type="file" accept="image/*,.heic,.heif" capture="environment" hidden>
+          <span>📷</span>
+          <b>कैमरे से तस्वीर लें</b>
+        </label>
+        <label class="big-action secondary">
+          <input id="rxFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" hidden>
+          <span>🖼️</span>
+          <b>फ़ोन या कंप्यूटर से चुनें</b>
+        </label>
+      </div>
+
+      <div id="rxPreviewWrap" class="preview hidden">
+        <img id="rxPreview" alt="प्रिस्क्रिप्शन की तस्वीर" />
+        <div class="actions">
+          <button id="replaceRxBtn" class="plain">तस्वीर बदलें</button>
+          <button id="analyzeRxBtn" class="primary">पर्ची पढ़ें</button>
+        </div>
+      </div>
+
+      <div id="rxProgress" class="loading hidden" aria-live="polite">
+        <div class="spinner"></div>
+        <span id="rxProgressText">तस्वीर पढ़ी जा रही है…</span>
+      </div>
+      <div id="rxVisionDiagnostic" class="message hidden" aria-live="polite"></div>
+    </section>
+
+    <section class="card hidden" id="rxResultsCard">
+      <div class="section-head">
+        <h2>पर्ची में यह लिखा है</h2>
+        <p>दवा का पैक देते समय इसी जानकारी से मिलान किया जाएगा।</p>
+      </div>
+      <div id="rxMedicineList" class="medicine-list"></div>
+      <div id="rxAdviceBox" class="advice hidden"></div>
+    </section>
+
+    <section class="card muted-card" id="medicineCard" aria-disabled="true">
+      <div class="number">2</div>
+      <div class="section-head">
+        <h2>अब दवा के पैक की तस्वीर दें</h2>
+        <p id="medicineHint">पहले प्रिस्क्रिप्शन पढ़ें।</p>
+      </div>
+
+      <div class="upload-row">
+        <label class="big-action">
+          <input id="medCameraInput" type="file" accept="image/*,.heic,.heif" capture="environment" hidden disabled>
+          <span>📷</span>
+          <b>कैमरे से तस्वीर लें</b>
+        </label>
+        <label class="big-action secondary">
+          <input id="medFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif" hidden disabled>
+          <span>🖼️</span>
+          <b>दवा की तस्वीर चुनें</b>
+        </label>
+      </div>
+
+      <div id="medPreviewWrap" class="preview hidden">
+        <img id="medPreview" alt="दवा के पैक की तस्वीर" />
+        <div class="actions">
+          <button id="replaceMedBtn" class="plain">तस्वीर बदलें</button>
+          <button id="analyzeMedBtn" class="primary">दवा जाँचें</button>
+        </div>
+      </div>
+
+      <div id="medProgress" class="loading hidden" aria-live="polite">
+        <div class="spinner"></div>
+        <span id="medProgressText">दवा पढ़ी जा रही है…</span>
+      </div>
+      <div id="medVisionDiagnostic" class="message hidden" aria-live="polite"></div>
+      <div id="medResult" class="result hidden" aria-live="polite"></div>
+    </section>
+
+    <section class="card hidden" id="historyCard">
+      <div class="section-head">
+        <h2>जाँची गई दवाएँ</h2>
+      </div>
+      <div id="historyList" class="history"></div>
+    </section>
+
+    <footer>
+      दवा या खुराक को लेकर संदेह हो तो डॉक्टर या फार्मासिस्ट से पुष्टि करें।<br><small>सुनाई जाने वाली आवाज़ एआई द्वारा बनाई जाती है।</small>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
