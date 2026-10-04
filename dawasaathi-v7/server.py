@@ -61,7 +61,7 @@ FALLBACK_ABBREVIATIONS = {
 _RATE_BUCKETS = defaultdict(deque)
 _RATE_LOCK = threading.Lock()
 _ABBREVIATION_LOCK = threading.Lock()
-_ABBREVIATION_CACHE = {"loaded_at": 0.0, "mapping": dict(FALLBACK_ABBREVIATIONS), "source": "fallback"}
+_ABBREVIATION_CACHE = {"loaded_at": 0.0, "mapping": dict(FALLBACK_ABBREVIATIONS), "source": "fallback", "error": ""}
 
 PRESCRIPTION_SCHEMA = {
     "type": "object",
@@ -216,7 +216,7 @@ validate_strict_schema(MEDICINE_SCHEMA, "medicine")
 
 
 def google_doc_export_url(url: str) -> str:
-    match = re.search(r"docs\\.google\\.com/document/d/([^/]+)", url or "")
+    match = re.search(r"docs\.google\.com/document/d/([^/]+)", url or "")
     if not match:
         return ""
     return f"https://docs.google.com/document/d/{match.group(1)}/export?format=txt"
@@ -224,7 +224,7 @@ def google_doc_export_url(url: str) -> str:
 
 def parse_abbreviation_document(text: str) -> dict:
     mapping = {}
-    separators = re.compile(r"^\\s*([A-Za-z0-9][A-Za-z0-9 .+/_-]{0,30}?)\\s*(?:=|:|\\t|\\s[-–—]\\s)\\s*(.+?)\\s*$")
+    separators = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9 .+/_-]{0,30}?)\s*(?:=|:|\t|\s[-–—]\s)\s*(.+?)\s*$")
     for raw_line in (text or "").splitlines():
         line = raw_line.strip().lstrip("•*-").strip()
         if not line:
@@ -232,8 +232,8 @@ def parse_abbreviation_document(text: str) -> dict:
         match = separators.match(line)
         if not match:
             continue
-        key = re.sub(r"\\s+", " ", match.group(1)).strip().upper()
-        value = re.sub(r"\\s+", " ", match.group(2)).strip()
+        key = re.sub(r"\s+", " ", match.group(1)).strip().upper()
+        value = re.sub(r"\s+", " ", match.group(2)).strip()
         if not key or not value or len(key) > 30 or len(value) > 300:
             continue
         # Avoid accidentally treating prose headings as abbreviation keys.
@@ -263,18 +263,24 @@ def load_abbreviation_mapping(force: bool = False) -> tuple[dict, str]:
                     _ABBREVIATION_CACHE.update({
                         "loaded_at": now,
                         "mapping": parsed,
-                        "source": "google_doc"
+                        "source": "google_doc",
+                        "error": ""
                     })
                     return dict(parsed), "google_doc"
-                print("Abbreviation document fetched but no mappings were parsed; using fallback.")
+                error_detail = "Google Doc fetched successfully, but no abbreviation mappings could be parsed."
+                print(error_detail)
             except Exception as e:
-                print(f"Could not load abbreviation document: {e}")
+                error_detail = f"Could not load Google Doc: {type(e).__name__}: {e}"
+                print(error_detail)
+        else:
+            error_detail = "The abbreviation source URL is not a recognized Google Docs document URL."
 
         fallback = dict(FALLBACK_ABBREVIATIONS)
         _ABBREVIATION_CACHE.update({
             "loaded_at": now,
             "mapping": fallback,
-            "source": "fallback"
+            "source": "fallback",
+            "error": error_detail
         })
         return fallback, "fallback"
 
@@ -283,9 +289,9 @@ def abbreviation_prompt_block() -> str:
     mapping, source = load_abbreviation_mapping()
     lines = [f"{key} = {value}" for key, value in mapping.items()]
     return (
-        "\\n\\nAUTHORITATIVE ABBREVIATION KEY "
-        f"(source: {source}; do not override with general medical convention):\\n"
-        + "\\n".join(lines)
+        "\n\nAUTHORITATIVE ABBREVIATION KEY "
+        f"(source: {source}; do not override with general medical convention):\n"
+        + "\n".join(lines)
     )
 
 
@@ -504,7 +510,8 @@ class DawaSaathiHandler(SimpleHTTPRequestHandler):
                 "model": MODEL,
                 "tts_model": TTS_MODEL,
                 "abbreviation_source": source,
-                "abbreviation_count": len(mapping)
+                "abbreviation_count": len(mapping),
+                "abbreviation_error": str(_ABBREVIATION_CACHE.get("error", ""))
             })
             return
         if self.path == "/api/abbreviations":
@@ -512,6 +519,7 @@ class DawaSaathiHandler(SimpleHTTPRequestHandler):
             self._send_json(200, {
                 "ok": True,
                 "source": source,
+                "error": str(_ABBREVIATION_CACHE.get("error", "")),
                 "mapping": mapping
             })
             return
