@@ -198,37 +198,54 @@ function unitHindi(form='', count=1){
 }
 
 function prescriptionVisionToParsed(v={}){
-  const meds=(Array.isArray(v.medications)?v.medications:[]).map(m=>({
-    name:String(m.drug_name||'').trim(),
-    nameHindi:safeHindiName(m.drug_name_hindi||''),
-    dose:String(m.dose||'').trim(),
-    frequency:String(m.frequency||'').trim(),
-    route:String(m.route||'').trim(),
-    duration:String(m.duration||'').trim(),
-    instructions:String(m.instructions||'').trim(),
-    instructionsHindi:hasDevanagari(m.instructions_hindi||'')?String(m.instructions_hindi||'').trim():'',
-    confidence:Number(m.confidence||0),
-    uncertainty:String(m.uncertainty||'').trim(),
-    sourceLine:[m.drug_name,m.dose,m.frequency,m.route,m.duration,m.instructions].filter(Boolean).join(' | ')
-  })).filter(m=>m.name || m.nameHindi);
+  const meds=(Array.isArray(v.medications)?v.medications:[]).map(m=>{
+    const genericIngredients=(Array.isArray(m.generic_ingredients)?m.generic_ingredients:[])
+      .map(x=>({
+        name:String(x?.name||'').trim(),
+        nameHindi:safeHindiName(x?.name_hindi||''),
+        confidence:Number(x?.confidence||0)
+      }))
+      .filter(x=>x.name);
+    return {
+      prescribedName:String(m.prescribed_name||'').trim(),
+      genericName:String(m.generic_name||'').trim(),
+      genericNameHindi:safeHindiName(m.generic_name_hindi||''),
+      genericIngredients,
+      genericMappingConfidence:Number(m.generic_mapping_confidence||0),
+      name:String(m.generic_name||m.prescribed_name||'').trim(),
+      nameHindi:safeHindiName(m.generic_name_hindi||''),
+      dose:String(m.dose||'').trim(),
+      frequency:String(m.frequency||'').trim(),
+      route:String(m.route||'').trim(),
+      duration:String(m.duration||'').trim(),
+      instructions:String(m.instructions||'').trim(),
+      instructionsHindi:hasDevanagari(m.instructions_hindi||'')?String(m.instructions_hindi||'').trim():'',
+      confidence:Number(m.confidence||0),
+      uncertainty:String(m.uncertainty||'').trim(),
+      sourceLine:[m.prescribed_name,m.generic_name,m.dose,m.frequency,m.route,m.duration,m.instructions].filter(Boolean).join(' | ')
+    };
+  }).filter(m=>m.prescribedName || m.genericName);
   const adviceHindi=Array.isArray(v.other_instructions_hindi)?v.other_instructions_hindi.filter(x=>x&&hasDevanagari(x)):[];
   return {meds, adviceHindi};
 }
 function medicineVisionToPack(v={}){
-  const ingredients=Array.isArray(v.active_ingredients)?v.active_ingredients.filter(x=>x&&(x.name||x.name_hindi)):[];
+  const ingredients=(Array.isArray(v.active_ingredients)?v.active_ingredients:[])
+    .map(x=>({
+      name:String(x?.name||'').trim(),
+      nameHindi:safeHindiName(x?.name_hindi||''),
+      strength:String(x?.strength||'').trim(),
+      confidence:Number(x?.confidence||0)
+    }))
+    .filter(x=>x.name);
   const primary=ingredients[0]||{};
   const displayName=String(v.display_name||v.brand_name||primary.name||'').trim();
   const displayHindi=safeHindiName(v.display_name_hindi||primary.name_hindi||'');
   const strengthText=String(v.strength_text||primary.strength||'').trim();
   const looksConcentrated=/\/\s*\d|\/\s*(?:m?l|g)\b|\bper\s+\d/i.test(strengthText);
-  const matchNames=[v.display_name,v.brand_name,...ingredients.map(x=>x.name)].map(x=>String(x||'').trim()).filter(Boolean);
-  const matchNamesHindi=[v.display_name_hindi,...ingredients.map(x=>x.name_hindi)].map(x=>String(x||'').trim()).filter(Boolean);
   return {
     name:displayName,
     nameHindi:displayHindi,
     brandName:String(v.brand_name||'').trim(),
-    matchNames:[...new Set(matchNames)],
-    matchNamesHindi:[...new Set(matchNamesHindi)],
     strength:strengthText,
     strengthObj:looksConcentrated?null:parseStrength(strengthText),
     modified:normalizeReleaseType(v.release_type||''),
@@ -240,17 +257,33 @@ function medicineVisionToPack(v={}){
     uncertainties:Array.isArray(v.uncertainties)?v.uncertainties.filter(Boolean):[]
   };
 }
+function ingredientSet(items=[]){
+  return [...new Set(items.map(x=>normalizeDrugName(x?.name||x)).filter(Boolean))].sort();
+}
+function ingredientSetScore(rxIngredients=[],packIngredients=[]){
+  const rx=ingredientSet(rxIngredients), pk=ingredientSet(packIngredients);
+  if(!rx.length || !pk.length) return 0;
+  if(rx.length!==pk.length) return 0;
+  let total=0;
+  const used=new Set();
+  for(const r of rx){
+    let best=-1,bestScore=0;
+    for(let i=0;i<pk.length;i++){
+      if(used.has(i)) continue;
+      const score=nameSimilarity(r,pk[i]);
+      if(score>bestScore){bestScore=score;best=i;}
+    }
+    if(best<0 || bestScore<0.86) return 0;
+    used.add(best); total+=bestScore;
+  }
+  return total/rx.length;
+}
 function findBestRxMatch(pack){
   let best=null;
-  const packNames=[...(pack.matchNames||[]),...(pack.matchNamesHindi||[]),pack.name,pack.nameHindi].filter(Boolean);
   for(const med of state.rxMeds){
-    const medNames=[med.name,med.nameHindi].filter(Boolean);
-    for(const a of packNames){
-      for(const b of medNames){
-        const score=nameSimilarity(a,b);
-        if(!best || score>best.score) best={med,score};
-      }
-    }
+    if(med.genericMappingConfidence<0.75 || !(med.genericIngredients||[]).length) continue;
+    const score=ingredientSetScore(med.genericIngredients,pack.ingredients);
+    if(!best || score>best.score) best={med,score};
   }
   return best;
 }
@@ -398,8 +431,11 @@ function renderRx(parsed){
       if(med.frequency) details.push(`कितनी बार: ${frequencyHindi(med.frequency)}`);
       if(med.route && routeHindi(med.route)) details.push(`कैसे: ${routeHindi(med.route)}`);
       if(med.duration) details.push(`कितने समय: ${durationHindi(med.duration)}`);
-      const name=med.nameHindi||'दवा का नाम स्पष्ट नहीं';
-      list.insertAdjacentHTML('beforeend',`<div class="rx-item"><div class="rx-name">${escapeHtml(name)}</div><div class="rx-details">${details.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join('')}</div>${med.instructionsHindi?`<div class="rx-note">${escapeHtml(med.instructionsHindi)}</div>`:''}</div>`);
+      const name=med.genericNameHindi||med.nameHindi||'दवा का नाम स्पष्ट नहीं';
+      const genericNote=med.genericName
+        ? `<div class="rx-note">जेनेरिक दवा: ${escapeHtml(med.genericName)}</div>`
+        : `<div class="rx-note">जेनेरिक नाम भरोसेमंद तरीके से तय नहीं हो सका।</div>`;
+      list.insertAdjacentHTML('beforeend',`<div class="rx-item"><div class="rx-name">${escapeHtml(name)}</div><div class="rx-details">${details.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join('')}</div>${genericNote}${med.instructionsHindi?`<div class="rx-note">${escapeHtml(med.instructionsHindi)}</div>`:''}</div>`);
     }
   }else{
     list.innerHTML='<div class="rx-item"><div class="rx-name">कोई दवा साफ़ नहीं पढ़ी गई</div><div class="rx-note">अगर पर्ची में दवा लिखी है, तो डॉक्टर या फार्मासिस्ट से पुष्टि करें।</div></div>';
@@ -449,9 +485,9 @@ async function speakHindi(text, button=null){
   }
 }
 function makeGuidance(match,pack){
-  if(!match || match.score<.56){
+  if(!match || match.score<.86){
     const n=pack.nameHindi||'यह दवा';
-    return {type:'no-match',title:'यह दवा पर्ची में नहीं मिली',spoken:`${n} आपकी पर्ची में लिखी दवाओं से मेल नहीं खाती। इसे लेने से पहले डॉक्टर या फार्मासिस्ट से पुष्टि करें।`,facts:'दवा का नाम पर्ची से भरोसेमंद तरीके से नहीं मिला।'};
+    return {type:'no-match',title:'यह दवा पर्ची में नहीं मिली',spoken:`${n} के जेनेरिक घटक आपकी पर्ची में लिखी दवा के जेनेरिक घटकों से मेल नहीं खाते। इसे लेने से पहले डॉक्टर या फार्मासिस्ट से पुष्टि करें।`,facts:'मिलान ब्रांड नाम से नहीं, जेनेरिक दवा के घटकों से किया गया।'};
   }
   const med=match.med, n=med.nameHindi||pack.nameHindi||'यह दवा';
   if(pack.overallConfidence<.55){
