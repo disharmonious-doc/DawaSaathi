@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import threading
 import time
 from collections import defaultdict, deque
@@ -36,8 +37,31 @@ OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
 MAX_BODY_BYTES = 30 * 1024 * 1024
 MAX_SPEECH_CHARS = 1400
 RATE_LIMIT_PER_HOUR = int(os.environ.get("RATE_LIMIT_PER_HOUR", "60"))
+ABBREVIATION_SOURCE_URL = os.environ.get(
+    "ABBREVIATION_SOURCE_URL",
+    "https://docs.google.com/document/d/1lZgbBglFlKZ5mVfdz2Y42W557Ye0toJUxqOfPgSLgW0/edit?tab=t.0"
+).strip()
+ABBREVIATION_CACHE_SECONDS = int(os.environ.get("ABBREVIATION_CACHE_SECONDS", "600"))
+
+# Used only when the public Google Doc cannot be reached or parsed.
+FALLBACK_ABBREVIATIONS = {
+    "OD": "Once a day at any fixed time of the day",
+    "OD BBF": "Once a day, in the morning empty stomach",
+    "BD": "Twice a day",
+    "TDS": "Thrice a day",
+    "QID": "Four times a day",
+    "ABF": "After breakfast",
+    "BL": "Before lunch",
+    "AL": "After lunch",
+    "AD": "After dinner",
+    "OD HS": "Once a day, before sleeping",
+    "MV": "multivitamin",
+    "BC": "B complex",
+}
 _RATE_BUCKETS = defaultdict(deque)
 _RATE_LOCK = threading.Lock()
+_ABBREVIATION_LOCK = threading.Lock()
+_ABBREVIATION_CACHE = {"loaded_at": 0.0, "mapping": dict(FALLBACK_ABBREVIATIONS), "source": "fallback"}
 
 PRESCRIPTION_SCHEMA = {
     "type": "object",
@@ -70,6 +94,7 @@ PRESCRIPTION_SCHEMA = {
                     "generic_mapping_confidence": {"type": "number"},
                     "dose": {"type": "string"},
                     "frequency": {"type": "string"},
+                    "frequency_hindi": {"type": "string"},
                     "route": {"type": "string"},
                     "duration": {"type": "string"},
                     "instructions": {"type": "string"},
@@ -79,7 +104,7 @@ PRESCRIPTION_SCHEMA = {
                 },
                 "required": [
                     "prescribed_name", "generic_name", "generic_name_hindi", "generic_ingredients",
-                    "generic_mapping_confidence", "dose", "frequency", "route", "duration",
+                    "generic_mapping_confidence", "dose", "frequency", "frequency_hindi", "route", "duration",
                     "instructions", "instructions_hindi", "confidence", "uncertainty"
                 ]
             }
@@ -144,8 +169,8 @@ Rules:
 7. generic_mapping_confidence is confidence in the brand/generic normalization itself, from 0 to 1. If the prescribed name is unreadable, ambiguous, or the brand-to-generic mapping is uncertain, return generic_name="", generic_name_hindi="", generic_ingredients=[], set generic_mapping_confidence below 0.75, and explain why in uncertainty. Do not guess.
 8. Extract dose, frequency, route, duration and visible medication-specific instructions only from what is visible on the prescription.
 9. instructions_hindi must be a faithful, simple Hindi translation of instructions visibly present. If none are visible, return an empty string. Do not add food timing or other advice that is not visible.
-10. Preserve visible prescription abbreviations exactly in frequency. Use this project's authoritative mapping when reading them: OD = once a day at any fixed time; OD BBF = once a day in the morning on an empty stomach; BD = twice a day; TDS = thrice a day; QID = four times a day; ABF = after breakfast; BL = before lunch; AL = after lunch; AD = after dinner; OD HS = once a day before sleeping. Keep composite forms such as 'OD BBF' and 'OD HS' together. MV means multivitamin and BC means B complex when visibly written as the medicine name.
-11. If any clinical field is not visible or not safely readable, return an empty string and explain the uncertainty. Never guess dose, strength, frequency, route, or duration.
+10. Preserve visible prescription abbreviations exactly in frequency. Interpret abbreviations ONLY according to the authoritative abbreviation key appended below. Put the faithful simple Hindi meaning in frequency_hindi. Keep composite abbreviations together. If an abbreviation is not in the supplied key and its meaning is not literally written out on the prescription, do not guess: leave frequency_hindi empty and note the uncertainty.
+11. If any clinical field is not visible or not safely readable, return an empty string and explain the uncertainty. Never guess dose, strength, frequency, route or duration.
 12. You may label route as Oral only when oral use is unambiguous from the prescription; otherwise leave route empty.
 13. Put all other clinically relevant visible advice in other_instructions in English and faithful simple Hindi translations in other_instructions_hindi, in the same order. Do not add advice.
 14. confidence means confidence in the visual reading. generic_mapping_confidence separately measures confidence in generic normalization.
@@ -190,6 +215,80 @@ validate_strict_schema(PRESCRIPTION_SCHEMA, "prescription")
 validate_strict_schema(MEDICINE_SCHEMA, "medicine")
 
 
+def google_doc_export_url(url: str) -> str:
+    match = re.search(r"docs\\.google\\.com/document/d/([^/]+)", url or "")
+    if not match:
+        return ""
+    return f"https://docs.google.com/document/d/{match.group(1)}/export?format=txt"
+
+
+def parse_abbreviation_document(text: str) -> dict:
+    mapping = {}
+    separators = re.compile(r"^\\s*([A-Za-z0-9][A-Za-z0-9 .+/_-]{0,30}?)\\s*(?:=|:|\\t|\\s[-–—]\\s)\\s*(.+?)\\s*$")
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip().lstrip("•*-").strip()
+        if not line:
+            continue
+        match = separators.match(line)
+        if not match:
+            continue
+        key = re.sub(r"\\s+", " ", match.group(1)).strip().upper()
+        value = re.sub(r"\\s+", " ", match.group(2)).strip()
+        if not key or not value or len(key) > 30 or len(value) > 300:
+            continue
+        # Avoid accidentally treating prose headings as abbreviation keys.
+        if len(key.split()) > 4 and not re.fullmatch(r"[0-9]+(?:[-–][0-9]+){1,3}", key):
+            continue
+        mapping[key] = value
+    return mapping
+
+
+def load_abbreviation_mapping(force: bool = False) -> tuple[dict, str]:
+    now = time.time()
+    with _ABBREVIATION_LOCK:
+        if not force and now - float(_ABBREVIATION_CACHE.get("loaded_at", 0)) < ABBREVIATION_CACHE_SECONDS:
+            return dict(_ABBREVIATION_CACHE["mapping"]), str(_ABBREVIATION_CACHE["source"])
+
+        export_url = google_doc_export_url(ABBREVIATION_SOURCE_URL)
+        if export_url:
+            try:
+                req = urllib.request.Request(
+                    export_url,
+                    headers={"User-Agent": "DawaSaathi/7.0"}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    text = resp.read().decode("utf-8", errors="replace")
+                parsed = parse_abbreviation_document(text)
+                if parsed:
+                    _ABBREVIATION_CACHE.update({
+                        "loaded_at": now,
+                        "mapping": parsed,
+                        "source": "google_doc"
+                    })
+                    return dict(parsed), "google_doc"
+                print("Abbreviation document fetched but no mappings were parsed; using fallback.")
+            except Exception as e:
+                print(f"Could not load abbreviation document: {e}")
+
+        fallback = dict(FALLBACK_ABBREVIATIONS)
+        _ABBREVIATION_CACHE.update({
+            "loaded_at": now,
+            "mapping": fallback,
+            "source": "fallback"
+        })
+        return fallback, "fallback"
+
+
+def abbreviation_prompt_block() -> str:
+    mapping, source = load_abbreviation_mapping()
+    lines = [f"{key} = {value}" for key, value in mapping.items()]
+    return (
+        "\\n\\nAUTHORITATIVE ABBREVIATION KEY "
+        f"(source: {source}; do not override with general medical convention):\\n"
+        + "\\n".join(lines)
+    )
+
+
 def api_error_message(body: bytes, fallback: str) -> str:
     try:
         data = json.loads(body.decode("utf-8", errors="replace"))
@@ -224,7 +323,7 @@ def call_openai(image_data_url: str, mode: str):
     if mode == "prescription":
         schema = PRESCRIPTION_SCHEMA
         schema_name = "dawasaathi_prescription"
-        instructions = PRESCRIPTION_INSTRUCTIONS
+        instructions = PRESCRIPTION_INSTRUCTIONS + abbreviation_prompt_block()
         user_text = "Read this prescription image and return only the structured extraction requested by the schema."
         max_output = 4500
     elif mode == "medicine":
@@ -398,11 +497,22 @@ class DawaSaathiHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/api/health":
+            mapping, source = load_abbreviation_mapping()
             self._send_json(200, {
                 "ok": True,
                 "api_key_configured": bool(OPENAI_API_KEY),
                 "model": MODEL,
-                "tts_model": TTS_MODEL
+                "tts_model": TTS_MODEL,
+                "abbreviation_source": source,
+                "abbreviation_count": len(mapping)
+            })
+            return
+        if self.path == "/api/abbreviations":
+            mapping, source = load_abbreviation_mapping()
+            self._send_json(200, {
+                "ok": True,
+                "source": source,
+                "mapping": mapping
             })
             return
         return super().do_GET()
